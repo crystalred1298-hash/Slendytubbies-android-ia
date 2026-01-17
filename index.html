@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Slendytubbies Vertical</title>
+    
+    <link rel="icon" type="image/png" href="icono.png">
+    <link rel="apple-touch-icon" href="icono.png">
+
+    <style>
+        * { box-sizing: border-box; }
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            background: #000; 
+            touch-action: none; 
+            font-family: 'Segoe UI', sans-serif;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Contador estilo movil vertical */
+        #contador {
+            position: absolute; top: env(safe-area-inset-top, 20px); left: 50%;
+            transform: translateX(-50%);
+            background: rgba(255, 0, 255, 0.4); color: #fff;
+            padding: 10px 25px; border-radius: 50px; border: 2px solid #ff66ff;
+            font-size: 18px; font-weight: bold; z-index: 500;
+            text-align: center; width: auto; min-width: 150px;
+        }
+
+        #estatica {
+            position: absolute; width: 100%; height: 100%; top: 0; left: 0;
+            background: url('https://media.giphy.com/media/oEI9uWUic8vle/giphy.gif');
+            opacity: 0; pointer-events: none; z-index: 400; mix-blend-mode: screen;
+        }
+
+        /* Joysticks: Posición perfecta para jugar vertical con pulgares */
+        .joystick-base {
+            position: absolute; width: 110px; height: 110px; 
+            background: rgba(255,255,255,0.1);
+            border: 2px solid rgba(255,255,255,0.3); border-radius: 50%; 
+            z-index: 100; bottom: 80px;
+        }
+        #joy-move { left: 30px; } /* Mover personaje */
+        #joy-look { right: 30px; } /* Mover camara */
+
+        .knob {
+            position: absolute; width: 45px; height: 45px; background: #ff66ff;
+            border-radius: 50%; top: 32.5px; left: 32.5px; opacity: 0.8;
+            box-shadow: 0 0 15px rgba(255, 102, 255, 0.5);
+        }
+
+        /* Menús adaptados a pantalla de celular */
+        #menu, #death, #win {
+            position: absolute; width: 100%; height: 100%; z-index: 1000;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            background: rgba(0,0,0,0.95); color: white; text-align: center; padding: 40px;
+        }
+        #death, #win { display: none; }
+        h1 { font-size: 3rem; margin: 0; color: #ff66ff; text-transform: uppercase; }
+        p { font-size: 1.2rem; margin: 20px 0; opacity: 0.8; }
+        button { 
+            padding: 18px 45px; font-size: 20px; background: #ff00ff; 
+            color: white; border: none; border-radius: 10px; font-weight: bold;
+            box-shadow: 0 5px 0 #b300b3; active: translateY(3px);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="estatica"></div>
+    <div id="contador">PAPILLAS: 0 / 10</div>
+
+    <div id="menu">
+        <h1>SLENDY<br>IA</h1>
+        <p>RECOGE LAS PAPILLAS EN EL BOSQUE</p>
+        <button onclick="startGame()">JUGAR</button>
+    </div>
+
+    <div id="death">
+        <h1 style="color:red">TE ATRAPARON</h1>
+        <button onclick="location.reload()">REINTENTAR</button>
+    </div>
+
+    <div id="win">
+        <h1 style="color:#0f0">¡VICTORIA!</h1>
+        <button onclick="location.reload()">VOLVER</button>
+    </div>
+
+    <div id="joy-move" class="joystick-base"><div id="move-knob" class="knob"></div></div>
+    <div id="joy-look" class="joystick-base"><div id="look-knob" class="knob"></div></div>
+
+    <script src="https://unpkg.com/three@0.150.1/build/three.min.js"></script>
+    <script>
+        let scene, camera, renderer, player, tinky, papillas = [], score = 0, gameActive = false;
+        let moveInput = {x:0, y:0}, lookInput = {x:0, y:0};
+        const SENS = 0.02; // Sensibilidad suave para vertical
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x050510);
+            scene.fog = new THREE.Fog(0x050510, 2, 35);
+
+            // FOV 90 es mejor para pantallas verticales largas
+            camera = new THREE.PerspectiveCamera(90, window.innerWidth/window.innerHeight, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            document.body.appendChild(renderer.domElement);
+
+            scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.2));
+            player = new THREE.Group(); player.position.set(0, 1.6, 20);
+            player.add(camera); scene.add(player);
+
+            const ground = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.MeshStandardMaterial({color: 0x1a2e1a}));
+            ground.rotation.x = -Math.PI/2; scene.add(ground);
+
+            // Bosque y Casa
+            const dome = new THREE.Mesh(new THREE.SphereGeometry(6, 32, 16, 0, Math.PI*2, 0, Math.PI/2), new THREE.MeshStandardMaterial({color: 0x228B22}));
+            dome.position.set(-15, 0, -15); scene.add(dome);
+
+            for(let i=0; i<30; i++) {
+                const tree = new THREE.Group();
+                const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.3, 3.5), new THREE.MeshStandardMaterial({color: 0x3d2817}));
+                const leaves = new THREE.Mesh(new THREE.ConeGeometry(1.5, 5, 8), new THREE.MeshStandardMaterial({color: 0x0a2b0a}));
+                leaves.position.y = 3; tree.add(trunk, leaves);
+                tree.position.set(Math.random()*80-40, 1.5, Math.random()*80-40); scene.add(tree);
+            }
+
+            // Papillas
+            for(let i=0; i<10; i++) {
+                const p = new THREE.Group();
+                p.add(new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.2, 0.15), new THREE.MeshStandardMaterial({color: 0x777})));
+                const c = new THREE.Mesh(new THREE.SphereGeometry(0.25, 8, 8, 0, Math.PI*2, 0, Math.PI/2), new THREE.MeshStandardMaterial({color: 0xff66ff}));
+                c.position.y = 0.1; p.add(c);
+                p.position.set(Math.random()*70-35, 0.1, Math.random()*70-35);
+                scene.add(p); papillas.push(p);
+            }
+
+            tinky = new THREE.Mesh(new THREE.CapsuleGeometry(0.5, 1.6), new THREE.MeshStandardMaterial({color: 0x4B0082}));
+            tinky.position.set(0, 1.2, -15); scene.add(tinky);
+
+            setupControls();
+            animate();
+        }
+
+        function setupControls() {
+            const joys = [
+                {base: document.getElementById('joy-move'), knob: document.getElementById('move-knob'), isMove: true},
+                {base: document.getElementById('joy-look'), knob: document.getElementById('look-knob'), isMove: false}
+            ];
+
+            joys.forEach(j => {
+                const handle = (e) => {
+                    e.preventDefault();
+                    const t = e.targetTouches[0];
+                    const r = j.base.getBoundingClientRect();
+                    const dx = t.clientX - (r.left + 55), dy = t.clientY - (r.top + 55);
+                    const d = Math.min(Math.sqrt(dx*dx + dy*dy), 45);
+                    const a = Math.atan2(dy, dx);
+                    const kx = Math.cos(a)*d, ky = Math.sin(a)*d;
+                    j.knob.style.transform = `translate(${kx}px,${ky}px)`;
+                    if(j.isMove) moveInput = {x:kx/45, y:ky/45};
+                    else lookInput = {x:kx/45, y:ky/45};
+                };
+                j.base.addEventListener('touchmove', handle);
+                j.base.addEventListener('touchend', () => {
+                    j.knob.style.transform = '';
+                    if(j.isMove) moveInput = {x:0, y:0};
+                    else lookInput = {x:0, y:0};
+                });
+            });
+        }
+
+        function startGame() { document.getElementById('menu').style.display = 'none'; gameActive = true; }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if(!gameActive) return;
+
+            const fwd = new THREE.Vector3(0,0,-1).applyQuaternion(player.quaternion);
+            const side = new THREE.Vector3(1,0,0).applyQuaternion(player.quaternion);
+            player.position.addScaledVector(fwd, -moveInput.y*0.13);
+            player.position.addScaledVector(side, moveInput.x*0.13);
+
+            player.rotation.y -= lookInput.x * SENS;
+            camera.rotation.x -= lookInput.y * SENS;
+            camera.rotation.x = Math.max(-1.2, Math.min(1.2, camera.rotation.x));
+
+            tinky.lookAt(player.position.x, 1.2, player.position.z);
+            tinky.translateZ(0.045);
+
+            const d = tinky.position.distanceTo(player.position);
+            document.getElementById('estatica').style.opacity = d < 8 ? (8 - d) / 8 : 0;
+
+            papillas.forEach((p, i) => {
+                if(p.position.distanceTo(player.position) < 2) {
+                    scene.remove(p); papillas.splice(i, 1);
+                    score++; document.getElementById('contador').innerText = `PAPILLAS: ${score} / 10`;
+                    if(score === 10) { gameActive = false; document.getElementById('win').style.display = 'flex'; }
+                }
+            });
+            if(d < 1.4) { gameActive = false; document.getElementById('death').style.display = 'flex'; }
+            renderer.render(scene, camera);
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>
