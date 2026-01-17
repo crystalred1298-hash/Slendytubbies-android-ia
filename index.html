@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Slendytubbies: Horror Engine</title>
+    
+    <style>
+        :root { --accent: #ff00ff; --bg: #0a0a0a; }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        body { margin: 0; overflow: hidden; background: #000; touch-action: none; font-family: 'Segoe UI', Roboto, sans-serif; width: 100vw; height: 100vh; }
+
+        /* UI HUD */
+        #ui-container { position: absolute; top: env(safe-area-inset-top, 20px); width: 100%; display: flex; justify-content: space-between; padding: 0 25px; z-index: 500; align-items: center; pointer-events: none; }
+        #contador { background: rgba(0, 0, 0, 0.8); color: #fff; padding: 12px 25px; border-radius: 15px; border: 1px solid var(--accent); font-weight: bold; letter-spacing: 1px; box-shadow: 0 0 15px rgba(255, 0, 255, 0.2); pointer-events: auto; }
+        .ui-btn { background: rgba(255, 255, 255, 0.1); color: white; border: 1px solid rgba(255,255,255,0.3); padding: 12px 20px; border-radius: 12px; font-size: 13px; font-weight: bold; backdrop-filter: blur(5px); pointer-events: auto; }
+
+        /* Botón Saltar */
+        #jump-btn { position: absolute; right: 40px; bottom: 220px; width: 80px; height: 80px; background: rgba(255, 255, 255, 0.1); border: 2px solid var(--accent); border-radius: 50%; color: white; font-weight: bold; z-index: 600; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(5px); box-shadow: 0 0 20px rgba(255, 0, 255, 0.2); }
+
+        #estatica { position: absolute; width: 100%; height: 100%; top: 0; left: 0; background: url('https://media.giphy.com/media/oEI9uWUic8vle/giphy.gif'); opacity: 0; pointer-events: none; z-index: 400; mix-blend-mode: screen; }
+
+        /* Joysticks */
+        .joystick-base { position: absolute; width: 120px; height: 120px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.2); border-radius: 50%; z-index: 100; bottom: 70px; backdrop-filter: blur(3px); }
+        #joy-move { left: 40px; }
+        #joy-look { right: 40px; }
+        .knob { position: absolute; width: 50px; height: 50px; background: var(--accent); border-radius: 50%; top: 35px; left: 35px; box-shadow: 0 0 15px var(--accent); }
+
+        /* Pantallas de Menú */
+        .overlay-screen { position: absolute; width: 100%; height: 100%; z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; background: radial-gradient(circle, #1a051a 0%, #050505 100%); color: white; text-align: center; transition: opacity 0.5s; }
+        
+        .glitch-title { font-size: 3.5rem; text-transform: uppercase; letter-spacing: 5px; color: #fff; text-shadow: 3px 3px var(--accent), -3px -3px #00ffff; font-weight: 900; margin-bottom: 30px; }
+        
+        .play-btn { padding: 18px 50px; background: transparent; color: white; border: 2px solid var(--accent); border-radius: 4px; font-weight: bold; font-size: 1.2rem; cursor: pointer; transition: all 0.3s; text-transform: uppercase; letter-spacing: 2px; margin: 10px; position: relative; overflow: hidden; }
+        .play-btn:active { background: var(--accent); box-shadow: 0 0 30px var(--accent); }
+
+        #death { display: none; background: #000; }
+        #death h1 { color: #ff0000; font-size: 4rem; text-shadow: 0 0 20px #ff0000; }
+    </style>
+</head>
+<body>
+
+    <div id="estatica"></div>
+    <div id="ui-container">
+        <button class="ui-btn" onclick="toggleCamera()">CAMBIAR VISTA</button>
+        <div id="contador">PAPILLAS: 0 / 10</div>
+    </div>
+
+    <div id="jump-btn" onpointerdown="jump()">SALTAR</div>
+
+    <div id="menu" class="overlay-screen">
+        <div class="glitch-title">SLENDY<br>HORROR</div>
+        <p style="opacity: 0.6; margin-bottom: 20px;">LA CASA TELETUBBIE TE ESPERA</p>
+        <button class="play-btn" onclick="showModes()">INICIAR PARTIDA</button>
+    </div>
+
+    <div id="modos" class="overlay-screen" style="display: none;">
+        <div class="glitch-title" style="font-size: 2rem;">SELECCIONA HORA</div>
+        <button class="play-btn" style="border-color: #4dabff" onclick="startGame('dia')">DÍA</button>
+        <button class="play-btn" style="border-color: #ff8c4d" onclick="startGame('tarde')">TARDE</button>
+        <button class="play-btn" style="border-color: #5a00ff" onclick="startGame('noche')">NOCHE</button>
+    </div>
+
+    <div id="death" class="overlay-screen"><h1>FIN DE LA TRANSMISIÓN</h1><button class="play-btn" onclick="location.reload()">REINTENTAR</button></div>
+    <div id="win" class="overlay-screen" style="display:none"><h1>¡ESCAPASTE!</h1><button class="play-btn" onclick="location.reload()">VOLVER</button></div>
+
+    <div id="joy-move" class="joystick-base"><div id="move-knob" class="knob"></div></div>
+    <div id="joy-look" class="joystick-base"><div id="look-knob" class="knob"></div></div>
+
+    <script src="https://unpkg.com/three@0.150.1/build/three.min.js"></script>
+    <script>
+        let scene, camera, renderer, player, tinky, noonoo, laalaa, po, papillas = [], score = 0, gameActive = false;
+        let moveInput = {x:0, y:0}, lookInput = {x:0, y:0};
+        let isThirdPerson = false, currentModo = 'dia', handGroup, flashLight;
+        let vy = 0, isGrounded = true;
+        let laalaaState = 'sitting', poState = 'hanging';
+        const GRAVITY = -0.012, JUMP_FORCE = 0.28, SENS = 0.02;
+
+        function showModes() { document.getElementById('menu').style.display = 'none'; document.getElementById('modos').style.display = 'flex'; }
+
+        function initScene(modo) {
+            currentModo = modo;
+            scene = new THREE.Scene();
+            let fogCol = (modo==='dia') ? 0x87CEEB : (modo==='tarde' ? 0xcc6633 : 0x010103);
+            scene.background = new THREE.Color(fogCol);
+            scene.fog = new THREE.Fog(fogCol, 1, 60);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            document.body.appendChild(renderer.domElement);
+
+            player = new THREE.Group();
+            player.position.set(0, 0, 45);
+            scene.add(player);
+
+            // MANO CON LINTERNA
+            handGroup = new THREE.Group();
+            const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 0.5), new THREE.MeshStandardMaterial({color: 0xffdbac}));
+            arm.rotation.x = Math.PI/1.8; arm.position.set(0.35, -0.25, -0.3);
+            const lamp = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.03, 0.25), new THREE.MeshStandardMaterial({color: 0x111111}));
+            lamp.rotation.x = Math.PI/2; lamp.position.set(0.35, -0.15, -0.5);
+            flashLight = new THREE.SpotLight(0xffffff, 2.5, 30, Math.PI/6, 0.4);
+            flashLight.position.set(0.35, -0.15, -0.5);
+            flashLight.target.position.set(0.35, -0.15, -10);
+            handGroup.add(arm, lamp, flashLight, flashLight.target);
+            camera.add(handGroup);
+            player.add(camera);
+
+            // LUCES AMBIENTE
+            const amb = new THREE.AmbientLight(0xffffff, modo==='dia'?0.5:0.05);
+            scene.add(amb);
+
+            // SUELO
+            const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.MeshStandardMaterial({color: 0x0a110a}));
+            ground.rotation.x = -Math.PI/2; scene.add(ground);
+
+            // LA CASA (DOMO)
+            const house = new THREE.Group();
+            house.position.set(-35, 0, -35);
+            const dome = new THREE.Mesh(new THREE.SphereGeometry(12, 32, 20, 0, Math.PI*2, 0, Math.PI/2), new THREE.MeshStandardMaterial({color: 0x1e3d1e, side: THREE.DoubleSide}));
+            const floor = new THREE.Mesh(new THREE.CircleGeometry(11.5, 32), new THREE.MeshStandardMaterial({color: 0x333333}));
+            floor.rotation.x = -Math.PI/2; floor.position.y = 0.1;
+            house.add(dome, floor);
+            
+            // Maquinaria Interior
+            const mach = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.5, 4), new THREE.MeshStandardMaterial({color: 0x666666}));
+            mach.position.y = 2; house.add(mach);
+            const rampa = new THREE.Mesh(new THREE.BoxGeometry(4, 0.3, 10), new THREE.MeshStandardMaterial({color: 0x444444}));
+            rampa.rotation.x = -0.5; rampa.position.set(0, 2, -4); house.add(rampa);
+            scene.add(house);
+
+            // NOO NOO (Dando vueltas en la casa)
+            noonoo = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.8, 1.8), new THREE.MeshStandardMaterial({color: "blue"}));
+            noonoo.position.set(-35, 0.5, -35); scene.add(noonoo);
+
+            // DIPSY SIN CABEZA
+            const dipsy = new THREE.Mesh(new THREE.CapsuleGeometry(0.4, 1), new THREE.MeshStandardMaterial({color: "green"}));
+            dipsy.position.set(-30, 0.6, -30); scene.add(dipsy);
+
+            // LAA-LAA (Sentada)
+            laalaa = new THREE.Group();
+            const lBody = new THREE.Mesh(new THREE.CapsuleGeometry(0.4, 1), new THREE.MeshStandardMaterial({color: "yellow"}));
+            laalaa.add(lBody); laalaa.position.set(30, 0.6, 10);
+            scene.add(laalaa);
+
+            // PO (Colgada de un árbol)
+            po = new THREE.Mesh(new THREE.CapsuleGeometry(0.35, 1), new THREE.MeshStandardMaterial({color: "red"}));
+            po.position.set(10, 7, 20);
+            scene.add(po);
+
+            // TINKY WINKY
+            tinky = new THREE.Mesh(new THREE.CapsuleGeometry(0.6, 1.8), new THREE.MeshStandardMaterial({color: 0x2a0050}));
+            tinky.position.set(0, 0.9, -40);
+            scene.add(tinky);
+
+            // ÁRBOLES Y PAPILLAS
+            for(let i=0; i<80; i++) {
+                const t = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.5, 8), new THREE.MeshStandardMaterial({color: 0x221100}));
+                t.position.set(Math.random()*200-100, 4, Math.random()*200-100);
+                scene.add(t);
+            }
+            for(let i=0; i<10; i++) {
+                const p = new THREE.Mesh(new THREE.SphereGeometry(0.3), new THREE.MeshStandardMaterial({color: 0xff00ff, emissive: 0xff00ff, emissiveIntensity: 0.5}));
+                p.position.set(Math.random()*160-80, 0.3, Math.random()*160-80);
+                scene.add(p); papillas.push(p);
+            }
+
+            setupControls();
+            updateCameraPos();
+        }
+
+        function jump() { if(isGrounded) { vy = JUMP_FORCE; isGrounded = false; } }
+        function toggleCamera() { isThirdPerson = !isThirdPerson; updateCameraPos(); }
+        function updateCameraPos() {
+            if(isThirdPerson) { camera.position.set(0, 3, 6); handGroup.visible = false; }
+            else { camera.position.set(0, 1.7, 0); handGroup.visible = true; }
+        }
+
+        function setupControls() {
+            const joys = [{id:'joy-move', knob:'move-knob', isMove:true}, {id:'joy-look', knob:'look-knob', isMove:false}];
+            joys.forEach(j => {
+                const base = document.getElementById(j.id);
+                const knob = document.getElementById(j.knob);
+                base.addEventListener('touchmove', (e) => {
+                    e.preventDefault();
+                    const t = e.targetTouches[0];
+                    const r = base.getBoundingClientRect();
+                    const dx = t.clientX - (r.left + 60), dy = t.clientY - (r.top + 60);
+                    const d = Math.min(Math.sqrt(dx*dx + dy*dy), 50);
+                    const kx = (dx/50)*d, ky = (dy/50)*d;
+                    knob.style.transform = `translate(${kx}px,${ky}px)`;
+                    if(j.isMove) moveInput = {x:kx/50, y:ky/50}; else lookInput = {x:kx/50, y:ky/50};
+                });
+                base.addEventListener('touchend', () => { knob.style.transform = ''; if(j.isMove) moveInput={x:0,y:0}; else lookInput={x:0,y:0}; });
+            });
+        }
+
+        function startGame(modo) { document.getElementById('modos').style.display = 'none'; initScene(modo); gameActive = true; animate(); }
+
+        function animate() {
+            if(!gameActive) return;
+            requestAnimationFrame(animate);
+
+            // Movimiento Jugador
+            const speed = 0.13;
+            const fwd = new THREE.Vector3(0,0,-1).applyQuaternion(player.quaternion);
+            const side = new THREE.Vector3(1,0,0).applyQuaternion(player.quaternion);
+            player.position.addScaledVector(fwd, -moveInput.y * speed);
+            player.position.addScaledVector(side, moveInput.x * speed);
+
+            // Gravedad
+            vy += GRAVITY;
+            player.position.y += vy;
+            if(player.position.y <= 0) { player.position.y = 0; vy = 0; isGrounded = true; }
+
+            // Rotación Cámara
+            player.rotation.y -= lookInput.x * SENS;
+            camera.rotation.x -= lookInput.y * SENS;
+            camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x));
+
+            // Efecto de balanceo de linterna (Head Bobbing)
+            if(moveInput.x !== 0 || moveInput.y !== 0) {
+                handGroup.position.y = Math.sin(Date.now() * 0.01) * 0.02;
+                handGroup.position.x = Math.cos(Date.now() * 0.005) * 0.01;
+            }
+
+            // IA NooNoo (Giros locos)
+            noonoo.rotation.y += 0.05;
+            noonoo.position.x = -35 + Math.cos(Date.now()*0.001) * 5;
+            noonoo.position.z = -35 + Math.sin(Date.now()*0.001) * 5;
+
+            // Mecánica LAA-LAA (Se levanta)
+            const distLaalaa = laalaa.position.distanceTo(player.position);
+            if(distLaalaa < 6 && laalaaState === 'sitting') {
+                laalaaState = 'standing';
+            }
+            if(laalaaState === 'standing' && laalaa.position.y < 1.2) laalaa.position.y += 0.1;
+
+            // Mecánica PO (Se cae)
+            const distPo = new THREE.Vector2(po.position.x, po.position.z).distanceTo(new THREE.Vector2(player.position.x, player.position.z));
+            if(distPo < 5 && poState === 'hanging') poState = 'falling';
+            if(poState === 'falling' && po.position.y > 0.6) po.position.y -= 0.3;
+
+            // IA Tinky
+            tinky.lookAt(player.position.x, 0.9, player.position.z);
+            tinky.translateZ(currentModo==='noche'?0.085:0.07);
+
+            // Efectos de Terror
+            const d = tinky.position.distanceTo(player.position);
+            document.getElementById('estatica').style.opacity = d < 12 ? (12-d)/12 : 0;
+
+            // Colección Papillas
+            papillas.forEach((p, i) => {
+                if(p.position.distanceTo(player.position) < 2) {
+                    scene.remove(p); papillas.splice(i, 1);
+                    score++; document.getElementById('contador').innerText = `PAPILLAS: ${score} / 10`;
+                    if(score === 10) { gameActive = false; document.getElementById('win').style.display='flex'; }
+                }
+            });
+
+            if(d < 1.6) { gameActive = false; document.getElementById('death').style.display='flex'; }
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
